@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">MobileOpenClawGateway</string>
+    <string name="accessibility_service_description">MobileClaw Gateway Service for remote control.</string>
 </resources>

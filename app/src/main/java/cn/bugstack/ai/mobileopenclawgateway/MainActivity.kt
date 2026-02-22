@@ -1,28 +1,32 @@
 package cn.bugstack.ai.mobileopenclawgateway
 
+import android.content.Intent
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
-import cn.bugstack.ai.mobileopenclawgateway.ui.theme.MobileOpenClawGatewayTheme
+import androidx.compose.ui.unit.dp
+import cn.bugstack.ai.mobileopenclawgateway.ui.theme.AndroidMobileClawTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MobileOpenClawGatewayTheme {
+            AndroidMobileClawTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
-                        modifier = Modifier.padding(innerPadding)
+                    GatewayApp(
+                        modifier = Modifier.padding(innerPadding),
+                        onOpenSettings = {
+                            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        }
                     )
                 }
             }
@@ -31,17 +35,79 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
-}
+fun GatewayApp(modifier: Modifier = Modifier, onOpenSettings: () -> Unit) {
+    var host by remember { mutableStateOf("192.168.1.110") } // Default IP
+    var port by remember { mutableStateOf("8777") } // Default Port
+    
+    val connectionStatus by GatewayController.connectionStatus.collectAsState()
+    val logs by GatewayController.logs.collectAsState()
 
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    MobileOpenClawGatewayTheme {
-        Greeting("Android")
+    Column(modifier = modifier.padding(16.dp)) {
+        Text("MobileClaw Gateway", style = MaterialTheme.typography.headlineMedium)
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        OutlinedTextField(
+            value = host,
+            onValueChange = { host = it },
+            label = { Text("Socket Host") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        OutlinedTextField(
+            value = port,
+            onValueChange = { port = it },
+            label = { Text("Socket Port") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { 
+                    val p = port.toIntOrNull()
+                    if (p != null) {
+                        GatewayController.connect(host, p) 
+                    }
+                },
+                enabled = connectionStatus == "Disconnected" || connectionStatus.startsWith("Error")
+            ) {
+                Text("连接服务端")
+            }
+            
+            Button(
+                onClick = { GatewayController.disconnect() },
+                enabled = connectionStatus == "Connected" || connectionStatus == "Connecting..."
+            ) {
+                Text("断开服务端")
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text("Status: $connectionStatus")
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        Button(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
+            Text("打开辅助功能设置")
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        Text("Logs:", style = MaterialTheme.typography.titleMedium)
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .weight(1f)
+        ) {
+            items(logs.reversed()) { log ->
+                Text(log, style = MaterialTheme.typography.bodySmall)
+                HorizontalDivider()
+            }
+        }
     }
 }
