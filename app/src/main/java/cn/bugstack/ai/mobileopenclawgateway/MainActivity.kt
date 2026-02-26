@@ -36,7 +36,8 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun GatewayApp(modifier: Modifier = Modifier, onOpenSettings: () -> Unit) {
-    var host by remember { mutableStateOf("192.168.1.110") } // Default IP
+//    var host by remember { mutableStateOf("192.168.1.110") } // Default IP
+    var host by remember { mutableStateOf("172.20.10.8") } // Default IP
     var port by remember { mutableStateOf("8777") } // Default Port
     
     val connectionStatus by GatewayController.connectionStatus.collectAsState()
