@@ -13,19 +13,29 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import cn.bugstack.ai.mobileopenclawgateway.ui.theme.AndroidMobileClawTheme
+import cn.bugstack.ai.mobileopenclawgateway.ui.theme.MobileOpenClawGatewayTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        val prefs = getSharedPreferences("gateway_prefs", android.content.Context.MODE_PRIVATE)
+        val savedHost = prefs.getString("host", "192.168.1.106") ?: "192.168.1.106"
+        val savedPort = prefs.getString("port", "8777") ?: "8777"
+
         setContent {
-            AndroidMobileClawTheme {
+            MobileOpenClawGatewayTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     GatewayApp(
                         modifier = Modifier.padding(innerPadding),
+                        initialHost = savedHost,
+                        initialPort = savedPort,
                         onOpenSettings = {
                             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        },
+                        onSaveConfig = { host, port ->
+                            prefs.edit().putString("host", host).putString("port", port).apply()
                         }
                     )
                 }
@@ -35,13 +45,28 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun GatewayApp(modifier: Modifier = Modifier, onOpenSettings: () -> Unit) {
-//    var host by remember { mutableStateOf("192.168.1.110") } // Default IP
-    var host by remember { mutableStateOf("172.20.10.8") } // Default IP
-    var port by remember { mutableStateOf("8777") } // Default Port
+fun GatewayApp(
+    modifier: Modifier = Modifier,
+    initialHost: String,
+    initialPort: String,
+    onOpenSettings: () -> Unit,
+    onSaveConfig: (String, String) -> Unit
+) {
+    var host by remember { mutableStateOf(initialHost) }
+    var port by remember { mutableStateOf(initialPort) }
     
     val connectionStatus by GatewayController.connectionStatus.collectAsState()
     val logs by GatewayController.logs.collectAsState()
+
+    // Auto connect on launch
+    LaunchedEffect(Unit) {
+        if (connectionStatus == "Disconnected") {
+            val p = port.toIntOrNull()
+            if (p != null) {
+                GatewayController.connect(host, p)
+            }
+        }
+    }
 
     Column(modifier = modifier.padding(16.dp)) {
         Text("MobileClaw Gateway", style = MaterialTheme.typography.headlineMedium)
@@ -71,6 +96,7 @@ fun GatewayApp(modifier: Modifier = Modifier, onOpenSettings: () -> Unit) {
                 onClick = { 
                     val p = port.toIntOrNull()
                     if (p != null) {
+                        onSaveConfig(host, port)
                         GatewayController.connect(host, p) 
                     }
                 },

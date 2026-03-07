@@ -67,7 +67,6 @@ class GatewayAccessibilityService : AccessibilityService() {
         }
     }
 
-
     private fun performClick(command: Command, onResult: (GatewayResponse) -> Unit) {
         val params = command.params
         if (params == null) {
@@ -228,6 +227,43 @@ class GatewayAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun performGetInstalledApps(command: Command, onResult: (GatewayResponse) -> Unit) {
+        try {
+            val pm = packageManager
+            // 获取所有已安装的应用
+            val packages = pm.getInstalledPackages(PackageManager.GET_META_DATA)
+            val appList = ArrayList<Map<String, String>>()
+
+            for (packageInfo in packages) {
+                // 过滤掉系统应用，或者保留用户安装的应用
+                // 如果需要获取所有应用，可以移除这个判断
+                if ((packageInfo.applicationInfo?.flags?.and(ApplicationInfo.FLAG_SYSTEM)) == 0) {
+                    val appName = packageInfo.applicationInfo?.loadLabel(pm).toString()
+                    val packageName = packageInfo.packageName
+
+                    val appData = HashMap<String, String>()
+                    appData["name"] = appName
+                    appData["package"] = packageName
+                    appList.add(appData)
+                }
+            }
+
+            // 将列表转换为 JSON 字符串返回
+            val jsonApps = Gson().toJson(appList)
+            onResult(GatewayResponse(command.id, "success", "Installed apps retrieved: $jsonApps", null))
+
+        } catch (e: Exception) {
+            onResult(
+                GatewayResponse(
+                    command.id,
+                    "error",
+                    "Failed to get installed apps: ${e.message}",
+                    null
+                )
+            )
+        }
+    }
+
     private fun performScreenshot(command: Command, onResult: (GatewayResponse) -> Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val executor = mainExecutor
@@ -252,12 +288,22 @@ class GatewayAccessibilityService : AccessibilityService() {
                                 val byteArray = outputStream.toByteArray()
                                 val base64String = Base64.encodeToString(byteArray, Base64.NO_WRAP)
 
+                                val screenWidth = resources.displayMetrics.widthPixels;
+                                val screenHeight = resources.displayMetrics.heightPixels
+                                val screenOrientation = resources.configuration.orientation
+                                val imageInfo = ImageInfo(
+                                    base64String,
+                                    screenWidth,
+                                    screenHeight,
+                                    screenOrientation,
+                                )
+
                                 onResult(
                                     GatewayResponse(
                                         command.id,
                                         "success",
                                         "Screenshot taken",
-                                        base64String
+                                        imageInfo
                                     )
                                 )
 
@@ -302,42 +348,4 @@ class GatewayAccessibilityService : AccessibilityService() {
             onResult(GatewayResponse(command.id, "error", "Screenshot requires Android 11+", null))
         }
     }
-
-    private fun performGetInstalledApps(command: Command, onResult: (GatewayResponse) -> Unit) {
-        try {
-            val pm = packageManager
-            // 获取所有已安装的应用
-            val packages = pm.getInstalledPackages(PackageManager.GET_META_DATA)
-            val appList = ArrayList<Map<String, String>>()
-
-            for (packageInfo in packages) {
-                // 过滤掉系统应用，或者保留用户安装的应用
-                // 如果需要获取所有应用，可以移除这个判断
-                if ((packageInfo.applicationInfo?.flags?.and(ApplicationInfo.FLAG_SYSTEM)) == 0) {
-                    val appName = packageInfo.applicationInfo?.loadLabel(pm).toString()
-                    val packageName = packageInfo.packageName
-
-                    val appData = HashMap<String, String>()
-                    appData["name"] = appName
-                    appData["package"] = packageName
-                    appList.add(appData)
-                }
-            }
-
-            // 将列表转换为 JSON 字符串返回
-            val jsonApps = Gson().toJson(appList)
-            onResult(GatewayResponse(command.id, "success", "Installed apps retrieved", jsonApps))
-
-        } catch (e: Exception) {
-            onResult(
-                GatewayResponse(
-                    command.id,
-                    "error",
-                    "Failed to get installed apps: ${e.message}",
-                    null
-                )
-            )
-        }
-    }
-
 }

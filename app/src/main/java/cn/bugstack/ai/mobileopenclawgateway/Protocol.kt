@@ -12,5 +12,12 @@ data class GatewayResponse(
     @SerializedName("id") val id: String,
     @SerializedName("status") val status: String, // success, error
     @SerializedName("message") val message: String?,
-    @SerializedName("data") val data: String? // base64 for screenshot
+    @SerializedName("image") val image: ImageInfo? = null
+)
+
+data class ImageInfo(
+    @SerializedName("data") val data: String?, // base64 for screenshot
+    @SerializedName("screenWidth") val screenWidth: Int,
+    @SerializedName("screenHeight") val screenHeight: Int,
+    @SerializedName("screenOrientation") val screenOrientation: Int,
 )
