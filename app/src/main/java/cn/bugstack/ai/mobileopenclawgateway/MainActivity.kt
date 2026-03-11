@@ -21,7 +21,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val prefs = getSharedPreferences("gateway_prefs", android.content.Context.MODE_PRIVATE)
-        val savedHost = prefs.getString("host", "192.168.1.106") ?: "192.168.1.106"
+        val savedHost = prefs.getString("host", "192.168.31.237") ?: "192.168.31.237"
         val savedPort = prefs.getString("port", "8777") ?: "8777"
 
         setContent {
