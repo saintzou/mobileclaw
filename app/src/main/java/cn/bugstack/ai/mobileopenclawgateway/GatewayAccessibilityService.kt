@@ -44,6 +44,8 @@ class GatewayAccessibilityService : AccessibilityService() {
         try {
             when (command.action) {
                 "click" -> performClick(command, onResult)
+                "double_tap" -> performDoubleTap(command, onResult)
+                "long_press" -> performLongPress(command, onResult)
                 "swipe" -> performSwipe(command, onResult)
                 "input" -> performInput(command, onResult)
                 "open" -> performOpenApp(command, onResult)
@@ -95,6 +97,73 @@ class GatewayAccessibilityService : AccessibilityService() {
 
         if (!success) {
             onResult(GatewayResponse(command.id, "error", "Failed to dispatch click gesture", null))
+        }
+    }
+
+    private fun performDoubleTap(command: Command, onResult: (GatewayResponse) -> Unit) {
+        val params = command.params
+        if (params == null) {
+            onResult(GatewayResponse(command.id, "error", "Missing params", null))
+            return
+        }
+        val x = (params["x"] as? Number)?.toFloat() ?: 0f
+        val y = (params["y"] as? Number)?.toFloat() ?: 0f
+
+        val builder = GestureDescription.Builder()
+        val path1 = Path()
+        path1.moveTo(x, y)
+        builder.addStroke(GestureDescription.StrokeDescription(path1, 0, 50))
+
+        val path2 = Path()
+        path2.moveTo(x, y)
+        builder.addStroke(GestureDescription.StrokeDescription(path2, 100, 50))
+
+        val gestureDescription = builder.build()
+
+        val success = dispatchGesture(gestureDescription, object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                onResult(GatewayResponse(command.id, "success", "Double tap performed at $x, $y", null))
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                onResult(GatewayResponse(command.id, "error", "Double tap cancelled", null))
+            }
+        }, null)
+
+        if (!success) {
+            onResult(GatewayResponse(command.id, "error", "Failed to dispatch double tap gesture", null))
+        }
+    }
+
+    private fun performLongPress(command: Command, onResult: (GatewayResponse) -> Unit) {
+        val params = command.params
+        if (params == null) {
+            onResult(GatewayResponse(command.id, "error", "Missing params", null))
+            return
+        }
+        val x = (params["x"] as? Number)?.toFloat() ?: 0f
+        val y = (params["y"] as? Number)?.toFloat() ?: 0f
+        val duration = (params["duration"] as? Number)?.toLong() ?: 1000L
+
+        val path = Path()
+        path.moveTo(x, y)
+        val builder = GestureDescription.Builder()
+        val gestureDescription = builder
+            .addStroke(GestureDescription.StrokeDescription(path, 0, duration))
+            .build()
+
+        val success = dispatchGesture(gestureDescription, object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                onResult(GatewayResponse(command.id, "success", "Long press performed at $x, $y", null))
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                onResult(GatewayResponse(command.id, "error", "Long press cancelled", null))
+            }
+        }, null)
+
+        if (!success) {
+            onResult(GatewayResponse(command.id, "error", "Failed to dispatch long press gesture", null))
         }
     }
 
@@ -264,7 +333,7 @@ class GatewayAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun performScreenshot(command: Command, onResult: (GatewayResponse) -> Unit) {
+    private fun performScreenshot(command: Command, onResult: (GatewayResponse) -> Unit, retryCount: Int = 3) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val executor = mainExecutor
             takeScreenshot(
@@ -282,7 +351,7 @@ class GatewayAccessibilityService : AccessibilityService() {
                                 val outputStream = ByteArrayOutputStream()
                                 softwareBitmap.compress(
                                     Bitmap.CompressFormat.JPEG,
-                                    70,
+                                    40,
                                     outputStream
                                 )
                                 val byteArray = outputStream.toByteArray()
@@ -321,26 +390,42 @@ class GatewayAccessibilityService : AccessibilityService() {
                             }
                             hardwareBuffer.close()
                         } catch (e: Exception) {
-                            onResult(
-                                GatewayResponse(
-                                    command.id,
-                                    "error",
-                                    "Screenshot processing failed: ${e.message}",
-                                    null
+                            Log.e("GatewayService", "Screenshot processing error", e)
+                            if (retryCount > 0) {
+                                Log.w("GatewayService", "Screenshot processing failed, retrying... ($retryCount left)")
+                                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                    performScreenshot(command, onResult, retryCount - 1)
+                                }, 500)
+                            } else {
+                                onResult(
+                                    GatewayResponse(
+                                        command.id,
+                                        "error",
+                                        "Screenshot processing failed: ${e.message}",
+                                        null
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
 
                     override fun onFailure(errorCode: Int) {
-                        onResult(
-                            GatewayResponse(
-                                command.id,
-                                "error",
-                                "Screenshot failed with error code: $errorCode",
-                                null
+                        Log.e("GatewayService", "Screenshot capture failed with code: $errorCode")
+                        if (retryCount > 0) {
+                            Log.w("GatewayService", "Retrying screenshot... ($retryCount left)")
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                performScreenshot(command, onResult, retryCount - 1)
+                            }, 500)
+                        } else {
+                            onResult(
+                                GatewayResponse(
+                                    command.id,
+                                    "error",
+                                    "Screenshot failed with error code: $errorCode",
+                                    null
+                                )
                             )
-                        )
+                        }
                     }
                 }
             )
