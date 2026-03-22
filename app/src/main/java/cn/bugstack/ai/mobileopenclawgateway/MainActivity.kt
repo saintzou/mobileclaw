@@ -21,7 +21,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val prefs = getSharedPreferences("gateway_prefs", android.content.Context.MODE_PRIVATE)
-        val savedHost = prefs.getString("host", "192.168.1.106") ?: "192.168.1.106"
+        val savedHost = prefs.getString("host", "192.168.0.3") ?: "192.168.0.3"
         val savedPort = prefs.getString("port", "8777") ?: "8777"
 
         setContent {
@@ -54,7 +54,7 @@ fun GatewayApp(
 ) {
     var host by remember { mutableStateOf(initialHost) }
     var port by remember { mutableStateOf(initialPort) }
-
+    
     val connectionStatus by GatewayController.connectionStatus.collectAsState()
     val logs by GatewayController.logs.collectAsState()
 
@@ -70,41 +70,41 @@ fun GatewayApp(
 
     Column(modifier = modifier.padding(16.dp)) {
         Text("MobileClaw Gateway", style = MaterialTheme.typography.headlineMedium)
-
+        
         Spacer(modifier = Modifier.height(16.dp))
-
+        
         OutlinedTextField(
             value = host,
             onValueChange = { host = it },
             label = { Text("Socket Host") },
             modifier = Modifier.fillMaxWidth()
         )
-
+        
         Spacer(modifier = Modifier.height(8.dp))
-
+        
         OutlinedTextField(
             value = port,
             onValueChange = { port = it },
             label = { Text("Socket Port") },
             modifier = Modifier.fillMaxWidth()
         )
-
+        
         Spacer(modifier = Modifier.height(16.dp))
-
+        
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
-                onClick = {
+                onClick = { 
                     val p = port.toIntOrNull()
                     if (p != null) {
                         onSaveConfig(host, port)
-                        GatewayController.connect(host, p)
+                        GatewayController.connect(host, p) 
                     }
                 },
                 enabled = connectionStatus == "Disconnected" || connectionStatus.startsWith("Error")
             ) {
                 Text("连接服务端")
             }
-
+            
             Button(
                 onClick = { GatewayController.disconnect() },
                 enabled = connectionStatus == "Connected" || connectionStatus == "Connecting..."
@@ -112,19 +112,19 @@ fun GatewayApp(
                 Text("断开服务端")
             }
         }
-
+        
         Spacer(modifier = Modifier.height(8.dp))
-
+        
         Text("Status: $connectionStatus")
-
+        
         Spacer(modifier = Modifier.height(16.dp))
-
+        
         Button(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
             Text("打开辅助功能设置")
         }
-
+        
         Spacer(modifier = Modifier.height(16.dp))
-
+        
         Text("Logs:", style = MaterialTheme.typography.titleMedium)
         LazyColumn(
             modifier = Modifier
