@@ -14,7 +14,7 @@ class ScreenCaptureActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // 透明 Activity，不需要 setContentView
-        
+
         val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         startActivityForResult(mediaProjectionManager.createScreenCaptureIntent(), REQUEST_CODE)
     }
@@ -22,6 +22,9 @@ class ScreenCaptureActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode == REQUEST_CODE) {
             ScreenCaptureManager.setPermissionResult(resultCode, data)
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                ScreenCaptureManager.startService(this, resultCode, data)
+            }
             finish()
         }
     }

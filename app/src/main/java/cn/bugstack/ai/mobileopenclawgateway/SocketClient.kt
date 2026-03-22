@@ -16,7 +16,7 @@ class SocketClient(private val onCommandReceived: (Command) -> Unit) {
     private var job: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val gson = Gson()
-    
+
     // Use a single thread for connection management to avoid race conditions
     private val connectionDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
 

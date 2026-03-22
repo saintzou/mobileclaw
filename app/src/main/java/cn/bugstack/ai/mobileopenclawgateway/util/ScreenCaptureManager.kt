@@ -11,109 +11,124 @@ import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
+import cn.bugstack.ai.mobileopenclawgateway.MediaProjectionService
 import cn.bugstack.ai.mobileopenclawgateway.ScreenCaptureActivity
-import java.lang.Exception
-import java.util.ArrayList
+import java.util.concurrent.CopyOnWriteArrayList
 
 object ScreenCaptureManager {
     private const val TAG = "ScreenCaptureManager"
+
     private var mediaProjection: MediaProjection? = null
+    private var virtualDisplay: VirtualDisplay? = null
+    private var imageReader: ImageReader? = null
+    private var serviceIntent: Intent? = null
+
+    // 缓存的权限结果
     private var projectionResultCode: Int = 0
     private var projectionResultData: Intent? = null
-    private var mediaProjectionManager: MediaProjectionManager? = null
 
-    // 存储待执行的任务：Context 和 Callback
-    private data class PendingCapture(val context: Context, val callback: (Bitmap?) -> Unit)
-    private val pendingCaptures = ArrayList<PendingCapture>()
-    
+    // 等待截图的回调队列
+    private val pendingCallbacks = CopyOnWriteArrayList<(Bitmap?) -> Unit>()
+
+    // 缓存最新一帧
+    @Volatile
+    private var lastCapturedBitmap: Bitmap? = null
+
+    // 后台线程处理截图
+    private var backgroundThread: HandlerThread? = null
+    private var backgroundHandler: Handler? = null
+
+    // 是否正在录制（服务已启动且 VirtualDisplay 已创建）
+    var isRecording: Boolean = false
+        private set
+
+    fun requestPermission(context: Context) {
+        val intent = Intent(context, ScreenCaptureActivity::class.java)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+    }
+
     fun setPermissionResult(code: Int, data: Intent?) {
         projectionResultCode = code
         projectionResultData = data
+
         if (code == Activity.RESULT_OK && data != null) {
-            // 注意：这里需要一个Context来获取 MediaProjectionManager，
-            // 但我们在 onActivityResult 里没有合适的 Context (除了 Activity 本身)。
-            // 我们可以等到 processPendingCaptures 时再初始化 mediaProjection。
-            processPendingCaptures()
-        } else {
-            // 权限被拒绝
-            val callbacks = ArrayList(pendingCaptures)
-            pendingCaptures.clear()
-            callbacks.forEach { it.callback(null) }
+            // 权限已获取
         }
     }
 
-    fun capture(context: Context, callback: (Bitmap?) -> Unit) {
-        if (mediaProjection != null) {
-            takeScreenshot(context, mediaProjection!!, callback)
-            return
+    // 新增：由 Activity 调用以启动服务
+    fun startService(context: Context, code: Int, data: Intent) {
+        val intent = Intent(context, MediaProjectionService::class.java).apply {
+            action = MediaProjectionService.ACTION_START
+            putExtra(MediaProjectionService.EXTRA_RESULT_CODE, code)
+            putExtra(MediaProjectionService.EXTRA_RESULT_DATA, data)
         }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
+    }
 
-        // 检查是否已有缓存的权限数据
-        if (projectionResultCode == Activity.RESULT_OK && projectionResultData != null) {
-             if (mediaProjectionManager == null) {
-                mediaProjectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            }
-            try {
-                mediaProjection = mediaProjectionManager?.getMediaProjection(projectionResultCode, projectionResultData!!)
-                if (mediaProjection != null) {
-                    takeScreenshot(context, mediaProjection!!, callback)
-                    return
+    fun stopService(context: Context) {
+        val intent = Intent(context, MediaProjectionService::class.java).apply {
+            action = MediaProjectionService.ACTION_STOP
+        }
+        context.startService(intent)
+        stopRecording()
+    }
+
+    // 由 Service 调用
+    fun onServiceStarted(context: Context, code: Int, data: Intent) {
+        Log.d(TAG, "Service started, initializing MediaProjection")
+        val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        try {
+            // 启动后台线程
+            startBackgroundThread()
+
+            mediaProjection = projectionManager.getMediaProjection(code, data)
+            mediaProjection?.registerCallback(object : MediaProjection.Callback() {
+                override fun onStop() {
+                    stopRecording()
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to create MediaProjection from cached result", e)
-                // 可能是缓存的数据失效了，重新请求
-                projectionResultCode = 0
-                projectionResultData = null
-                mediaProjection = null
-            }
-        }
+            }, backgroundHandler)
 
-        // 需要请求权限
-        pendingCaptures.add(PendingCapture(context, callback))
-        
-        if (pendingCaptures.size == 1) { // 避免重复启动 Activity
-            val intent = Intent(context, ScreenCaptureActivity::class.java)
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(intent)
+            createVirtualDisplay(context)
+            isRecording = true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create MediaProjection", e)
+            isRecording = false
         }
     }
 
-    private fun processPendingCaptures() {
-        if (pendingCaptures.isEmpty()) return
-        
-        // 取出第一个任务的 Context 来初始化 MediaProjection
-        val firstTask = pendingCaptures[0]
-        val context = firstTask.context
-        
-        if (mediaProjectionManager == null) {
-            mediaProjectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        }
-
-        if (projectionResultCode == Activity.RESULT_OK && projectionResultData != null) {
-            mediaProjection = mediaProjectionManager?.getMediaProjection(projectionResultCode, projectionResultData!!)
-        }
-
-        if (mediaProjection != null) {
-            val tasks = ArrayList(pendingCaptures)
-            pendingCaptures.clear()
-            tasks.forEach { task ->
-                takeScreenshot(task.context, mediaProjection!!, task.callback)
-            }
-        } else {
-             // 依然无法获取 MediaProjection，失败
-            val tasks = ArrayList(pendingCaptures)
-            pendingCaptures.clear()
-            tasks.forEach { task ->
-                task.callback(null)
-            }
+    private fun startBackgroundThread() {
+        if (backgroundThread == null) {
+            backgroundThread = HandlerThread("ScreenCaptureThread")
+            backgroundThread?.start()
+            backgroundHandler = Handler(backgroundThread!!.looper)
         }
     }
 
-    private fun takeScreenshot(context: Context, projection: MediaProjection, callback: (Bitmap?) -> Unit) {
+    private fun stopBackgroundThread() {
+        backgroundThread?.quitSafely()
+        try {
+            backgroundThread?.join()
+            backgroundThread = null
+            backgroundHandler = null
+        } catch (e: InterruptedException) {
+            Log.e(TAG, "Interrupted while stopping background thread", e)
+        }
+    }
+
+    private fun createVirtualDisplay(context: Context) {
+        if (mediaProjection == null) return
+
         val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val metrics = DisplayMetrics()
         windowManager.defaultDisplay.getRealMetrics(metrics)
@@ -121,55 +136,26 @@ object ScreenCaptureManager {
         val height = metrics.heightPixels
         val density = metrics.densityDpi
 
-        val imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
-        
-        val handler = Handler(Looper.getMainLooper())
-        
-        var virtualDisplay: VirtualDisplay? = null
+        // 使用 2 个缓冲区的 ImageReader
+        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
 
-        try {
-            virtualDisplay = projection.createVirtualDisplay(
-                "ScreenCapture",
-                width,
-                height,
-                density,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                imageReader.surface,
-                null,
-                handler
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to create VirtualDisplay", e)
-            callback(null)
-            return
-        }
+        virtualDisplay = mediaProjection?.createVirtualDisplay(
+            "ScreenCapture",
+            width,
+            height,
+            density,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            imageReader?.surface,
+            null,
+            backgroundHandler
+        )
 
-        // 使用 flag 确保只回调一次
-        var callbackInvoked = false
-
-        val timeoutRunnable = Runnable {
-            if (!callbackInvoked) {
-                callbackInvoked = true
-                Log.e(TAG, "Screenshot timeout")
-                try {
-                    virtualDisplay?.release()
-                    imageReader.close()
-                } catch (e: Exception) {
-                    // ignore
-                }
-                callback(null)
-            }
-        }
-        
-        // 设置 2 秒超时
-        handler.postDelayed(timeoutRunnable, 2000)
-
-        imageReader.setOnImageAvailableListener({ reader ->
-            if (callbackInvoked) return@setOnImageAvailableListener
-            
+        imageReader?.setOnImageAvailableListener({ reader ->
             try {
-                val image = reader.acquireLatestImage()
-                if (image != null) {
+                // 获取最新图片
+                val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+
+                try {
                     val planes = image.planes
                     val buffer = planes[0].buffer
                     val pixelStride = planes[0].pixelStride
@@ -182,7 +168,7 @@ object ScreenCaptureManager {
                         Bitmap.Config.ARGB_8888
                     )
                     bitmap.copyPixelsFromBuffer(buffer)
-                    
+
                     val finalBitmap = if (rowPadding == 0) {
                         bitmap
                     } else {
@@ -190,36 +176,103 @@ object ScreenCaptureManager {
                         bitmap.recycle()
                         cropped
                     }
-                    
-                    image.close()
-                    
-                    // 成功获取到图片
-                    callbackInvoked = true
-                    handler.removeCallbacks(timeoutRunnable)
-                    
-                    try {
-                        virtualDisplay?.release()
-                        reader.close()
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error closing resources", e)
+
+                    // 更新缓存
+                    synchronized(this) {
+                        lastCapturedBitmap?.recycle()
+                        lastCapturedBitmap = finalBitmap
                     }
-                    
-                    callback(finalBitmap)
+
+                    // 如果有等待的回调，立即分发
+                    if (pendingCallbacks.isNotEmpty()) {
+                        val callbacksToNotify = ArrayList(pendingCallbacks)
+                        pendingCallbacks.clear()
+
+                        // 由于 Bitmap 可能在下一次更新被 recycle，这里传递副本或者确保同步
+                        // 简单起见，传递副本比较安全，或者直接在 synchronized 块中处理
+                        // 为了性能，我们传递当前 Bitmap 的副本
+                        val bitmapToSend = finalBitmap.copy(Bitmap.Config.ARGB_8888, false)
+
+                        // 回调到主线程或者当前线程？通常 callback 会处理耗时操作，建议在后台线程
+                        callbacksToNotify.forEach { it(bitmapToSend) }
+                    }
+
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error converting image", e)
+                } finally {
+                    image.close()
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error processing image", e)
-                if (!callbackInvoked) {
-                    callbackInvoked = true
-                    handler.removeCallbacks(timeoutRunnable)
-                    try {
-                        virtualDisplay?.release()
-                        reader.close()
-                    } catch (closeEx: Exception) {
-                        // ignore
-                    }
-                    callback(null)
+                Log.e(TAG, "Error in onImageAvailable", e)
+            }
+        }, backgroundHandler)
+    }
+
+    private fun stopRecording() {
+        isRecording = false
+        try {
+            virtualDisplay?.release()
+            virtualDisplay = null
+            imageReader?.close()
+            imageReader = null
+            mediaProjection?.stop()
+            mediaProjection = null
+
+            synchronized(this) {
+                lastCapturedBitmap?.recycle()
+                lastCapturedBitmap = null
+            }
+
+            stopBackgroundThread()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping recording", e)
+        }
+
+        // 清理等待的回调
+        if (pendingCallbacks.isNotEmpty()) {
+            val callbacks = ArrayList(pendingCallbacks)
+            pendingCallbacks.clear()
+            callbacks.forEach { it(null) }
+        }
+    }
+
+    fun capture(context: Context, callback: (Bitmap?) -> Unit) {
+        if (isRecording) {
+            // 1. 尝试直接从缓存获取
+            var cached: Bitmap? = null
+            synchronized(this) {
+                if (lastCapturedBitmap != null && !lastCapturedBitmap!!.isRecycled) {
+                    cached = lastCapturedBitmap!!.copy(Bitmap.Config.ARGB_8888, false)
                 }
             }
-        }, handler)
+
+            if (cached != null) {
+                // 立即回调
+                callback(cached)
+            } else {
+                // 缓存为空（刚启动或出错），加入队列等待下一帧
+                pendingCallbacks.add(callback)
+            }
+        } else {
+            // 未开始录制，先尝试启动（如果有权限）
+            if (projectionResultCode == Activity.RESULT_OK && projectionResultData != null) {
+                // 有权限缓存，尝试启动服务
+                startService(context, projectionResultCode, projectionResultData!!)
+
+                pendingCallbacks.add(callback)
+
+                // 设置一个超时，以防服务启动失败
+                Handler(Looper.getMainLooper()).postDelayed({
+                    if (!isRecording && pendingCallbacks.contains(callback)) {
+                        pendingCallbacks.remove(callback)
+                        callback(null)
+                    }
+                }, 3000)
+            } else {
+                Log.e(TAG, "Capture requested but no recording active and no permission")
+                callback(null)
+                requestPermission(context)
+            }
+        }
     }
 }

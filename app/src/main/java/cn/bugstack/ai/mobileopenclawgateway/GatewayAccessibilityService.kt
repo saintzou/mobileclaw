@@ -4,9 +4,9 @@ import android.accessibilityservice.AccessibilityService
 import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
-import cn.bugstack.ai.mobileopenclawgateway.strategy.AndroidRStrategy
 import cn.bugstack.ai.mobileopenclawgateway.strategy.GatewayStrategy
 import cn.bugstack.ai.mobileopenclawgateway.strategy.LegacyStrategy
+import cn.bugstack.ai.mobileopenclawgateway.strategy.MediaProjectionStrategy
 
 class GatewayAccessibilityService : AccessibilityService() {
 
@@ -15,13 +15,13 @@ class GatewayAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         Log.d("GatewayService", "Service Connected")
-        
+
         strategy = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            AndroidRStrategy(this)
+            MediaProjectionStrategy(this)
         } else {
             LegacyStrategy(this)
         }
-        
+
         GatewayController.setService(this)
     }
 
