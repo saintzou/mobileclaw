@@ -4,6 +4,9 @@ import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/**
+ * saintzou
+ */
 object GatewayController {
     private var service: GatewayAccessibilityService? = null
     private val socketClient = SocketClient(::onCommandReceived)
